@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bitcoin DCA Simulator</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f14; color: #e0e0e0; padding: 20px; min-height: 100vh; }
+  h1 { text-align: center; font-size: 1.3rem; color: #f7931a; margin-bottom: 4px; }
+  .subtitle { text-align: center; font-size: 0.8rem; color: #888; margin-bottom: 18px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 20px; }
+  .control-group { display: flex; flex-direction: column; gap: 4px; }
+  label { font-size: 0.72rem; color: #aaa; }
+  input, select { background: #1e1e2e; border: 1px solid #333; color: #e0e0e0; border-radius: 6px; padding: 6px 10px; font-size: 0.82rem; width: 150px; }
+  input:focus { outline: none; border-color: #f7931a; }
+  button { background: #f7931a; color: #000; border: none; border-radius: 6px; padding: 8px 22px; font-weight: 700; font-size: 0.85rem; cursor: pointer; align-self: flex-end; }
+  button:hover { background: #ffaa44; }
+
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+  .stat-card { background: #1a1a26; border-radius: 10px; padding: 14px; border-left: 3px solid; }
+  .stat-card.weekly { border-color: #f7931a; }
+  .stat-card.monthly { border-color: #4a9eff; }
+  .stat-title { font-size: 0.72rem; color: #888; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; display: flex; align-items: center; gap: 6px; }
+  .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; margin: 4px 0; }
+  .stat-label { color: #888; }
+  .stat-val { font-weight: 600; }
+  .green { color: #4ade80; }
+  .orange { color: #f7931a; }
+  .blue { color: #4a9eff; }
+  .winner { background: #4ade8022; color: #4ade80; border: 1px solid #4ade8044; border-radius: 4px; font-size: 0.62rem; padding: 2px 6px; }
+
+  .chart-wrap { background: #1a1a26; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .tab-bar { display: flex; gap: 8px; margin-bottom: 14px; }
+  .tab { background: #1e1e2e; border: 1px solid #333; border-radius: 6px; padding: 5px 14px; font-size: 0.78rem; cursor: pointer; color: #aaa; }
+  .tab.active { background: #f7931a22; border-color: #f7931a; color: #f7931a; }
+  canvas { max-height: 280px; }
+  .note { text-align: center; font-size: 0.67rem; color: #444; margin-top: 10px; }
+  .copyright { text-align: center; font-size: 0.68rem; color: #555; margin-top: 8px; letter-spacing: 0.03em; }
+</style>
+</head>
+<body>
+<h1>⚡ Bitcoin DCA Simulator</h1>
+<div class="subtitle">$13.50/week vs $54/month — which stacks more sats?</div>
+
+<div class="controls">
+  <div class="control-group">
+    <label>Start Date</label>
+    <input type="month" id="startDate" value="2020-01">
+  </div>
+  <div class="control-group">
+    <label>End Date</label>
+    <input type="month" id="endDate" value="2025-01">
+  </div>
+  <div class="control-group">
+    <label>Weekly Amount ($)</label>
+    <input type="number" id="weeklyAmt" value="13.50" step="0.5" min="1">
+  </div>
+  <div class="control-group">
+    <label>Monthly Amount ($)</label>
+    <input type="number" id="monthlyAmt" value="54" step="1" min="1">
+  </div>
+  <div class="control-group">
+    <label>&nbsp;</label>
+    <button onclick="runSim()">Simulate ▶</button>
+  </div>
+</div>
+
+<div class="stats" id="statsSection"></div>
+
+<div class="chart-wrap">
+  <div class="tab-bar">
+    <div class="tab active" id="tab-value" onclick="switchTab('value')">Portfolio Value</div>
+    <div class="tab" id="tab-btc" onclick="switchTab('btc')">BTC Accumulated</div>
+    <div class="tab" id="tab-roi" onclick="switchTab('roi')">ROI %</div>
+  </div>
+  <canvas id="chart"></canvas>
+</div>
+
+<div class="note">* Uses historical BTC monthly closing prices (Jan 2017–Apr 2025). Weekly buys use interpolated prices within each month.</div>
+<div class="copyright">© 2025 Built by Andy Dwi Putrawan</div>
+
+<script>
+const PRICES = {
+  "2017-01":1012,"2017-02":1190,"2017-03":1070,"2017-04":1347,"2017-05":2299,
+  "2017-06":2550,"2017-07":2875,"2017-08":4748,"2017-09":4328,"2017-10":6180,
+  "2017-11":10047,"2017-12":14156,"2018-01":10233,"2018-02":10555,"2018-03":6925,
+  "2018-04":9240,"2018-05":7502,"2018-06":6412,"2018-07":8200,"2018-08":7048,
+  "2018-09":6624,"2018-10":6372,"2018-11":4039,"2018-12":3742,"2019-01":3456,
+  "2019-02":3805,"2019-03":4093,"2019-04":5320,"2019-05":8719,"2019-06":10796,
+  "2019-07":9592,"2019-08":9630,"2019-09":8294,"2019-10":9200,"2019-11":7566,
+  "2019-12":7193,"2020-01":9350,"2020-02":8624,"2020-03":6450,"2020-04":8650,
+  "2020-05":9456,"2020-06":9137,"2020-07":11370,"2020-08":11655,"2020-09":10784,
+  "2020-10":13804,"2020-11":19713,"2020-12":29374,"2021-01":33141,"2021-02":45240,
+  "2021-03":58926,"2021-04":57750,"2021-05":35662,"2021-06":35045,"2021-07":41626,
+  "2021-08":47112,"2021-09":43823,"2021-10":61374,"2021-11":57005,"2021-12":46306,
+  "2022-01":38466,"2022-02":43200,"2022-03":45531,"2022-04":37714,"2022-05":29788,
+  "2022-06":19784,"2022-07":23307,"2022-08":20050,"2022-09":19431,"2022-10":20492,
+  "2022-11":16547,"2022-12":16547,"2023-01":23130,"2023-02":23140,"2023-03":28478,
+  "2023-04":29244,"2023-05":27219,"2023-06":30477,"2023-07":29230,"2023-08":26010,
+  "2023-09":26967,"2023-10":34677,"2023-11":37736,"2023-12":42265,"2024-01":42534,
+  "2024-02":61198,"2024-03":70637,"2024-04":60626,"2024-05":67734,"2024-06":62613,
+  "2024-07":66000,"2024-08":59000,"2024-09":63300,"2024-10":72500,"2024-11":97500,
+  "2024-12":93429,"2025-01":101942,"2025-02":84000,"2025-03":82500,"2025-04":93000
+};
+
+function getKey(y, m) { return `${y}-${String(m).padStart(2,'0')}`; }
+function getPrice(key) {
+  if (PRICES[key]) return PRICES[key];
+  const keys = Object.keys(PRICES).sort();
+  const idx = keys.findIndex(k => k >= key);
+  if (idx <= 0) return PRICES[keys[0]];
+  if (idx >= keys.length) return PRICES[keys[keys.length-1]];
+  return (PRICES[keys[idx-1]] + PRICES[keys[idx]]) / 2;
+}
+
+let chartInst = null, currentTab = 'value', simData = null;
+
+function runSim() {
+  const [sy, sm] = document.getElementById('startDate').value.split('-').map(Number);
+  const [ey, em] = document.getElementById('endDate').value.split('-').map(Number);
+  const wAmt = parseFloat(document.getElementById('weeklyAmt').value) || 13.5;
+  const mAmt = parseFloat(document.getElementById('monthlyAmt').value) || 54;
+
+  const labels = [], wVals = [], mVals = [], wBtcs = [], mBtcs = [], wROIs = [], mROIs = [];
+  let wBtc = 0, mBtc = 0, wSpent = 0, mSpent = 0;
+
+  let y = sy, m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    const key = getKey(y, m);
+    const price = getPrice(key);
+    const prevKey = m === 1 ? getKey(y-1, 12) : getKey(y, m-1);
+    const prevPrice = getPrice(prevKey);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const numWeeks = Math.round(daysInMonth / 7);
+
+    // Monthly buy
+    mBtc += mAmt / price;
+    mSpent += mAmt;
+
+    // Weekly buys with interpolated price
+    for (let w = 0; w < numWeeks; w++) {
+      const frac = (w + 0.5) / numWeeks;
+      const wp = prevPrice + (price - prevPrice) * frac;
+      wBtc += wAmt / wp;
+      wSpent += wAmt;
+    }
+
+    labels.push(key);
+    wVals.push(+(wBtc * price).toFixed(2));
+    mVals.push(+(mBtc * price).toFixed(2));
+    wBtcs.push(+wBtc.toFixed(6));
+    mBtcs.push(+mBtc.toFixed(6));
+    wROIs.push(+(((wBtc * price - wSpent) / wSpent) * 100).toFixed(2));
+    mROIs.push(+(((mBtc * price - mSpent) / mSpent) * 100).toFixed(2));
+
+    m++; if (m > 12) { m = 1; y++; }
+  }
+
+  const fp = getPrice(getKey(ey, em));
+  simData = { labels, wVals, mVals, wBtcs, mBtcs, wROIs, mROIs, wSpent, mSpent, wBtc, mBtc, fp, wAmt, mAmt };
+  renderStats(); renderChart();
+}
+
+function renderStats() {
+  const { wSpent, mSpent, wBtc, mBtc, fp, wAmt, mAmt } = simData;
+  const wFin = wBtc * fp, mFin = mBtc * fp;
+  const wROI = ((wFin - wSpent) / wSpent * 100).toFixed(1);
+  const mROI = ((mFin - mSpent) / mSpent * 100).toFixed(1);
+  const wWins = wFin >= mFin;
+
+  document.getElementById('statsSection').innerHTML = `
+    <div class="stat-card weekly">
+      <div class="stat-title">📅 Weekly $${wAmt.toFixed(2)}/wk ${wWins ? '<span class="winner">🏆 More Sats</span>' : ''}</div>
+      <div class="stat-row"><span class="stat-label">Total Invested</span><span class="stat-val">$${wSpent.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,',')}</span></div>
+      <div class="stat-row"><span class="stat-label">BTC Accumulated</span><span class="stat-val orange">${wBtc.toFixed(6)} BTC</span></div>
+      <div class="stat-row"><span class="stat-label">Portfolio Value</span><span class="stat-val">$${wFin.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,',')}</span></div>
+      <div class="stat-row"><span class="stat-label">Total Return</span><span class="stat-val green">+${wROI}%</span></div>
+    </div>
+    <div class="stat-card monthly">
+      <div class="stat-title">🗓 Monthly $${mAmt.toFixed(0)}/mo ${!wWins ? '<span class="winner">🏆 More Sats</span>' : ''}</div>
+      <div class="stat-row"><span class="stat-label">Total Invested</span><span class="stat-val">$${mSpent.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,',')}</span></div>
+      <div class="stat-row"><span class="stat-label">BTC Accumulated</span><span class="stat-val blue">${mBtc.toFixed(6)} BTC</span></div>
+      <div class="stat-row"><span class="stat-label">Portfolio Value</span><span class="stat-val">$${mFin.toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g,',')}</span></div>
+      <div class="stat-row"><span class="stat-label">Total Return</span><span class="stat-val green">+${mROI}%</span></div>
+    </div>`;
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  renderChart();
+}
+
+function renderChart() {
+  if (!simData) return;
+  const { labels, wVals, mVals, wBtcs, mBtcs, wROIs, mROIs, wAmt, mAmt } = simData;
+  let wD, mD, fmt;
+  if (currentTab === 'value') { wD = wVals; mD = mVals; fmt = v => '$' + Math.round(v).toLocaleString(); }
+  else if (currentTab === 'btc') { wD = wBtcs; mD = mBtcs; fmt = v => v.toFixed(5) + ' BTC'; }
+  else { wD = wROIs; mD = mROIs; fmt = v => v.toFixed(1) + '%'; }
+
+  const ctx = document.getElementById('chart').getContext('2d');
+  if (chartInst) chartInst.destroy();
+  chartInst = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: `Weekly $${wAmt.toFixed(2)}/wk`, data: wD, borderColor: '#f7931a', backgroundColor: '#f7931a1a', fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 },
+        { label: `Monthly $${mAmt.toFixed(0)}/mo`, data: mD, borderColor: '#4a9eff', backgroundColor: '#4a9eff12', fill: true, tension: 0.35, pointRadius: 0, borderWidth: 2 }
+      ]
+    },
+    options: {
+      responsive: true,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: '#aaa', font: { size: 11 }, boxWidth: 14 } },
+        tooltip: {
+          backgroundColor: '#1e1e2e', borderColor: '#444', borderWidth: 1,
+          titleColor: '#ccc', bodyColor: '#aaa',
+          callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt(ctx.parsed.y)}` }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#555', maxTicksLimit: 9, font: { size: 10 } }, grid: { color: '#1e1e2e' } },
+        y: { ticks: { color: '#555', font: { size: 10 }, callback: fmt }, grid: { color: '#222' } }
+      }
+    }
+  });
+}
+
+runSim();
+</script>
+</body>
+</html>
